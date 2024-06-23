@@ -1,0 +1,9 @@
+[package]
+name = "CCweb"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+local-ip-address = "0.6.1"
+serde = "1.0.203"
+tokio = { version = "1.38.0", features = ["full"] }
