@@ -163,29 +163,63 @@ impl Request {
             resource,
         })
     }
-    pub fn better_parse(request: String) -> Result<Self, Box<dyn std::error::Error>> {
-        let request: Vec<&str> = request.lines().collect();
 
+    pub fn shart(request: String) -> Result<Self, Box<dyn std::error::Error>> {
+        // this was supposed to be a better parse method but it doesnt work for some reaoson
         let mut method: Option<HttpMethod> = None;
+        let mut resource: Option<String> = None;
         let mut version: Option<String> = None;
         let mut host: Option<SocketAddr> = None;
         let mut accept: Option<Doctype> = None;
-        let mut resource: Option<String> = None;
 
-        for line in request {
-            if line.starts_with("Request:") {
-                // this is the first line in the request, first header!        0        1          2           3
-                let line: Vec<&str> = line.split_whitespace().collect(); // Request: [METHOD] [RESOURCE] HTTP/[VERSION]
-                let method_str = line.get(1).unwrap_or(&"TRACE");
-                method = Some(HttpMethod::from_str(&method_str).unwrap_or(HttpMethod::GET))
+        // why did i do this
+        let mut start_line_parsed = false;
+
+        for line in request.lines() {
+            // this shit should never panic on split but we do this anyway
+            if !line.is_empty() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+
+                // Only parse the start line once
+                if !start_line_parsed && parts.len() == 3 && parts[2].starts_with("HTTP/") {
+                    method = Some(HttpMethod::from_str(parts[0]).unwrap_or(HttpMethod::GET));
+                    resource = Some(parts[1].to_string());
+                    version = Some(parts[2][5..].to_string()); // Extract version after "HTTP/"
+                    start_line_parsed = true; // start line now parsed
+                }
+                // Host header
+                else if line.starts_with("Host:") {
+                    let host_str = line
+                        .split_once(": ")
+                        .map(|(_, v)| v)
+                        .unwrap_or("0.0.0.0:8080");
+                    host = Some(host_str.to_socket_addrs()?.next().ok_or("Invalid host")?);
+                }
+                // Accept header
+                else if line.starts_with("Accept:") {
+                    let doctype_str = line.split_once(": ").map(|(_, v)| v).unwrap_or("text/html"); // Get the first value only
+                    accept = Some(Doctype::from_str(doctype_str).unwrap_or(Doctype::Html));
+                }
             }
         }
-        Ok(Self {
-            method,
-            version,
-            host,
-            accept,
-            resource,
-        })
+
+        if let (Some(method), Some(resource), Some(version), Some(host)) =
+            (method, resource, version, host)
+        {
+            println!(
+                "METHOD: {:?}\nRESOURCE: {:?}\nVERSION: {:?}\nHOST: {:?}, DOCTYPE: {:?}\n",
+                method, resource, version, host, accept
+            );
+
+            Ok(Self {
+                method: Some(method),
+                version: Some(version),
+                host: Some(host),
+                accept,
+                resource: Some(resource),
+            })
+        } else {
+            Err("Missing required fields in HTTP request".into())
+        }
     }
 }
