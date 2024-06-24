@@ -12,8 +12,14 @@ async fn handle_client(mut stream: TcpStream, addr: SocketAddr) {
     let mut buffer = [0; 1024];
     stream.read(&mut buffer).await.unwrap();
     println!("request from IP: {}", addr);
+    println!("--------------------------");
     match std::str::from_utf8(&buffer) {
-        Ok(request_str) => println!("Request: {}", request_str),
+        Ok(request_str) => {
+            println!("Request: {}", request_str);
+            let request = server::Request::parse(request_str.to_string()).unwrap();
+            println!("ok wish me luck");
+            println!("{:?}", request);
+        }
         Err(e) => println!("Failed to convert request to string: {}", e),
     }
 
