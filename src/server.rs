@@ -165,6 +165,7 @@ impl Request {
     }
 
     pub fn shart(request: String) -> Result<Self, Box<dyn std::error::Error>> {
+        // ignore this whole function
         // this was supposed to be a better parse method but it doesnt work for some reaoson
         let mut method: Option<HttpMethod> = None;
         let mut resource: Option<String> = None;
