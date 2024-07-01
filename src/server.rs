@@ -1,3 +1,4 @@
+use crate::user::{Language, User};
 use std::error::Error;
 use std::fmt;
 use std::{
@@ -163,7 +164,7 @@ impl Request {
             resource,
         })
     }
-
+    /*
     pub fn shart(request: String) -> Result<Self, Box<dyn std::error::Error>> {
         // ignore this whole function
         // this was supposed to be a better parse method but it doesnt work for some reaoson
@@ -222,5 +223,44 @@ impl Request {
         } else {
             Err("Missing required fields in HTTP request".into())
         }
+    } */
+}
+
+impl Response {
+    pub fn yousuck(request: Request) -> Result<Self, Box<dyn std::error::Error>> {
+        let version = request.version.unwrap();
+        let doctype: Doctype = Doctype::Json;
+        let mut length: i32 = 0;
+        let mut content: String = String::new();
+
+        let requested_user = request.resource.unwrap();
+        let mut resource: Option<User> = None;
+
+        match request.method.unwrap() {
+            HttpMethod::GET => {
+                // request route is USER ID, which will be used to lookup a user.
+                if let Ok(Some(loaded_user)) = User::lookup_user("users.csv", &requested_user) {
+                    println!("FOUND USER: {:?}", loaded_user);
+                    resource = Some(loaded_user);
+                }
+            }
+            HttpMethod::POST => {
+                // this will contain user ID, username, password,
+            }
+            HttpMethod::DELETE => {
+                println!("todo!");
+                todo!()
+            }
+            _ => {
+                println!("bad method lol")
+            }
+        }
+
+        Ok(Self {
+            version,
+            doctype,
+            length,
+            content,
+        })
     }
 }
