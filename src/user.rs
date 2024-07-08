@@ -1,12 +1,11 @@
-use bcrypt::{hash, verify, BcryptError};
-use std::fs::OpenOptions;
+use bcrypt::{hash, verify, BcryptError, DEFAULT_COST};
+use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct User {
-    ident: String,
     username: String,
     password_hash: String,
     languages: Vec<Language>,
@@ -24,31 +23,10 @@ pub enum Language {
 }
 
 impl User {
-    pub fn new(
-        username: String,
-        password: String,
-        file_path: &str,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut ident;
-        loop {
-            ident = Uuid::new_v4().to_string();
-            if !Self::ident_exists(file_path, &ident)? {
-                break;
-            }
-        }
-
-        if Self::username_exists(file_path, &username)? {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "Username already exists",
-            )));
-        }
-
-        let password_hash = hash(password, bcrypt::DEFAULT_COST)
-            .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
+    pub fn new(username: String, password: String) -> Result<Self, Box<dyn std::error::Error>> {
+        let password_hash = hash(password, DEFAULT_COST)?;
 
         Ok(User {
-            ident,
             username,
             password_hash,
             languages: Vec::new(),
@@ -79,8 +57,7 @@ impl User {
             .open(file_path)?;
         let languages: Vec<String> = self.languages.iter().map(|l| format!("{:?}", l)).collect();
         let line = format!(
-            "{},{},{},{}\n",
-            self.ident,
+            "{},{},{}\n",
             self.username,
             self.password_hash,
             languages.join("|")
@@ -88,18 +65,17 @@ impl User {
         file.write_all(line.as_bytes())
     }
 
-    pub fn lookup_user(file_path: &str, ident: &str) -> io::Result<Option<User>> {
-        let file = OpenOptions::new().read(true).open(file_path)?;
+    pub fn lookup_user(file_path: &str, username: &str) -> io::Result<Option<User>> {
+        let file = File::open(file_path)?;
         let reader = BufReader::new(file);
 
         for line in reader.lines() {
             let line = line?;
             let parts: Vec<&str> = line.split(',').collect();
-            if parts.len() >= 4 && parts[0] == ident {
-                let ident = parts[0].to_string();
-                let username = parts[1].to_string();
-                let password_hash = parts[2].to_string();
-                let languages = parts[3]
+            if parts.len() >= 3 && parts[0] == username {
+                let username = parts[0].to_string();
+                let password_hash = parts[1].to_string();
+                let languages = parts[2]
                     .split('|')
                     .filter_map(|s| match s {
                         "C" => Some(Language::C),
@@ -113,7 +89,6 @@ impl User {
                     })
                     .collect();
                 return Ok(Some(User {
-                    ident,
                     username,
                     password_hash,
                     languages,
@@ -123,31 +98,14 @@ impl User {
         Ok(None)
     }
 
-    fn ident_exists(file_path: &str, ident: &str) -> io::Result<bool> {
-        let file = OpenOptions::new().read(true).open(file_path)?;
-        let reader = BufReader::new(file);
-
-        for line in reader.lines() {
-            let line = line?;
-            let parts: Vec<&str> = line.split(',').collect();
-            if parts.len() >= 4 && parts[0] == ident {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
-    fn username_exists(file_path: &str, username: &str) -> io::Result<bool> {
-        let file = OpenOptions::new().read(true).open(file_path)?;
-        let reader = BufReader::new(file);
-
-        for line in reader.lines() {
-            let line = line?;
-            let parts: Vec<&str> = line.split(',').collect();
-            if parts.len() >= 4 && parts[1] == username {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+    pub fn to_string(&self) -> String {
+        let languages_str: Vec<String> =
+            self.languages.iter().map(|l| format!("{:?}", l)).collect();
+        format!(
+            "User {{ username: {}, password_hash: {}, languages: [{}] }}",
+            self.username,
+            self.password_hash,
+            languages_str.join(", ")
+        )
     }
 }

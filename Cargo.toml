@@ -7,3 +7,4 @@ edition = "2021"
 tokio = { version = "1.38.0", features = ["full"] }
 uuid = { version = "1.2", features = ["v4"] }
 bcrypt = "0.10"
+axum = "0.7.5"
