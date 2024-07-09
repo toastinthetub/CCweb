@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
@@ -33,6 +34,23 @@ pub enum DatabaseError {
 impl From<io::Error> for DatabaseError {
     fn from(error: io::Error) -> Self {
         DatabaseError::IoError(error)
+    }
+}
+
+impl FromStr for Language {
+    type Err = ();
+
+    fn from_str(input: &str) -> Result<Language, Self::Err> {
+        match input {
+            "C" => Ok(Language::C),
+            "CPP" => Ok(Language::CPP),
+            "Rust" => Ok(Language::Rust),
+            "Java" => Ok(Language::Java),
+            "Kotlin" => Ok(Language::Kotlin),
+            "JavaScript" => Ok(Language::JavaScript),
+            "TypeScript" => Ok(Language::TypeScript),
+            _ => Err(()),
+        }
     }
 }
 

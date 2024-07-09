@@ -26,7 +26,7 @@ async fn main() {
 
     let app = Router::new()
         .route(
-            "/:key/:user/:languages/:discordid",
+            "/:key/:mode/:user/:languages/:discordid",
             /*get(crate::server::get_handler)*/ post(crate::server::post_handler),
         )
         .route(
