@@ -26,6 +26,7 @@ pub enum Language {
 pub enum DatabaseError {
     MissingUsername,
     UserNotFound,
+    UserAlreadyExists,
     IoError(io::Error),
 }
 
@@ -99,7 +100,18 @@ impl User {
         Err(DatabaseError::UserNotFound)
     }
 
-    pub fn save_to_csv(&self, file_path: &str) -> io::Result<()> {
+    pub fn save_to_csv(&self, file_path: &str) -> Result<(), DatabaseError> {
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line?;
+            let parts: Vec<&str> = line.split(',').collect();
+            if parts.len() >= 1 && parts[0] == self.username {
+                return Err(DatabaseError::UserAlreadyExists);
+            }
+        }
+
         let mut file = OpenOptions::new()
             .append(true)
             .create(true)
@@ -111,7 +123,8 @@ impl User {
             languages.join("|"),
             self.discord_id,
         );
-        file.write_all(line.as_bytes())
+        file.write_all(line.as_bytes())?;
+        Ok(())
     }
 
     pub fn remove_user(file_path: &str, username: &str) -> io::Result<()> {
