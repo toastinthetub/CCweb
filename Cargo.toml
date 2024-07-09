@@ -10,4 +10,5 @@ uuid = { version = "1.2", features = ["v4"] }
 bcrypt = "0.15.1"
 axum = "0.7.5"
 dotenv = "0.15.0"
+serde_json = "1.0.120"
 

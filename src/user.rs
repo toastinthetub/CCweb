@@ -6,9 +6,9 @@ use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
-    username: String,
-    languages: Vec<Language>,
-    discord_id: String,
+    pub username: String,
+    pub languages: Vec<Language>,
+    pub discord_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -74,14 +74,26 @@ impl User {
         })
     }
 
-    pub fn add_language(&mut self, language: Language) {
-        if !self.languages.contains(&language) {
-            self.languages.push(language);
+    pub fn add_language(
+        &mut self,
+        language: Vec<Language>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for languages in language {
+            if !self.languages.contains(&languages) {
+                self.languages.push(languages);
+            }
         }
+        Ok(())
     }
 
-    pub fn remove_language(&mut self, language: &Language) {
-        self.languages.retain(|l| l != language);
+    pub fn remove_language(
+        &mut self,
+        language: Vec<Language>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for languages in language {
+            self.languages.retain(|l| *l != languages);
+        }
+        Ok(())
     }
 
     pub fn lookup_user(file_path: &str, username: &str) -> Result<User, DatabaseError> {

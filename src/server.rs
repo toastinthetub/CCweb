@@ -1,6 +1,6 @@
 use crate::user::{self, Language, User};
-use axum::{extract::Path, response::Html, routing::get, Router};
-use serde::Deserialize;
+use axum::{extract::Path, response::Html, routing::get, Form, Json, Router};
+use serde::{Deserialize, Serialize};
 use std::{env, error::Error, fmt, str::FromStr, vec};
 use tokio::net::lookup_host;
 
@@ -70,7 +70,7 @@ pub async fn get_handler(Path(param): Path<(String, String)>) -> Html<String> {
 
     let html_content = match user {
         Some(user) => {
-            println!("server user: {:?}", user);
+            println!("served user: {:?}", user);
             format!(r#"<h1>REQUESTED USER: {:?}</h1>"#, user)
         }
         None => {
@@ -83,7 +83,7 @@ pub async fn get_handler(Path(param): Path<(String, String)>) -> Html<String> {
 
 pub async fn post_handler(
     Path(param): Path<(String, String, String, String, String)>,
-) -> Html<String> {
+) -> Result<Result<Html<String>, Json<String>>, Box<dyn std::error::Error>> {
     let params = PathParams::from_post_list(axum::extract::Path(param.clone())).unwrap();
 
     let languages = match parse_languages(&params.languages.unwrap()) {
@@ -100,25 +100,182 @@ pub async fn post_handler(
         Err(e) => {
             let content = format!("<h1>Invalid key: {}</1>", params.key.clone().unwrap());
             println!("{:}", e);
-            return Html(content.to_owned());
+            return Ok(Ok(Html(content.to_owned())));
         }
     }
 
     match params.mode {
         Some(mode) => match mode {
             CommandMode::Create => {
-                user::User::create_user(params.user, Some(languages), params.discordid)
-            }
-            CommandMode::Destroy => user::User::remove_user(FILEPATH, params.user),
-            CommandMode::AppendLanguage => todo!(),
-            CommandMode::RemoveLanguage => todo!(),
-        },
-        None => todo!(),
-    }
-    .unwrap();
+                let user = match user::User::create_user(
+                    params.user.clone(),
+                    Some(languages),
+                    params.discordid,
+                ) {
+                    Ok(user) => {
+                        println!("successfully created user {:?}: {:?}", params.user, user);
+                        let html = format!(
+                            "<h1>Successfully created user {:?}: {:?}</h1>",
+                            params.user,
+                            serde_json::to_string(&user)
+                        );
+                        let json = format!(
+                            "Successfully created user: {:?}\n{:?}",
+                            params.user,
+                            serde_json::to_string(&user)
+                        );
 
-    let html_content = format!(r#"<h1>{:?}</h1>"#, param);
-    Html(html_content)
+                        // return  Ok(Err(Json(json)));
+                        return Ok(Ok(Html(html)));
+                    }
+                    Err(e) => {
+                        println!("failed to create user {:?}: {:?}", params.user, e);
+                        let html =
+                            format!("<h1>Failed to create user {:?}: {:?}</h1>", params.user, e);
+                        let json = format!("Failed to create user {:?}: {:?}", params.user, e);
+
+                        //return Ok(Err(Json(json)));
+                        return Ok(Ok(Html(html)));
+                    }
+                };
+            }
+            CommandMode::Destroy => {
+                match user::User::lookup_user(FILEPATH, &params.user.clone().unwrap()) {
+                    Ok(user) => {
+                        match user::User::remove_user(FILEPATH, &user.username) {
+                            Ok(_) => {
+                                println!("Successfully deleted user {:?}", user);
+                                let html = format!(
+                                    "<h1>Successfully deleted user: {:?}</h1>",
+                                    params.user
+                                );
+                                let json =
+                                    format!("Deleted user:\n{:?}", serde_json::to_string(&user));
+                                // return Ok(Err(Json(content)));
+                                return Ok(Ok(Html(html)));
+                            }
+                            Err(e) => {
+                                println!("error: failed to delete user {:?}", user);
+                                let html = format!(
+                                    "<h1>Failed to delete user {:?}: {e}</h1>",
+                                    params.user
+                                );
+                                let json = format!("Failed to delete user {:?}, {e}", params.user);
+                                // return Ok(Err(Json(content)));
+                                return Ok(Ok(Html(html)));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let html = format!("<h1>Could not find user: {:?}</h1>", e);
+                        let json = format!("Could not find user: {:?}", e);
+                        // return Ok(Err(Json(json)))
+                        return Ok(Ok(Html(html)));
+                    }
+                };
+            }
+            CommandMode::AppendLanguage => {
+                let mut user =
+                    match user::User::lookup_user(FILEPATH, &params.user.clone().unwrap()) {
+                        Ok(mut user) => {
+                            match user::User::add_language(&mut user, languages.clone()) {
+                                Ok(_) => {
+                                    println!(
+                                        "Successfully appended languages {:?} to user {:?}",
+                                        languages, params.user
+                                    );
+                                    let html = format!(
+                                    "<h1>Successfully appended languages {:?} to user: {:?}</h1>",
+                                    languages, params.user
+                                    );
+                                    let json = format!(
+                                        "Successfully appended languages {:?} to user: {:?}",
+                                        languages,
+                                        serde_json::to_string(&user)
+                                    );
+                                    // return Ok(Err(Json(content)));
+                                    return Ok(Ok(Html(html)));
+                                }
+                                Err(e) => {
+                                    let html = format!(
+                                        "<h1>Failed to append languages {:?}: {:?}</h1>",
+                                        languages, e
+                                    );
+                                    let json = format!(
+                                        "Failed to append languages {:?}: {:?}",
+                                        languages, e
+                                    );
+                                    // return Ok(Err(Json(json)))
+                                    return Ok(Ok(Html(html)));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let html = format!("<h1>Could not find user: {:?}</h1>", e);
+                            let json = format!("Could not find user: {:?}", e);
+                            // return Ok(Err(Json(json)))
+                            return Ok(Ok(Html(html)));
+                        }
+                    };
+            }
+            CommandMode::RemoveLanguage => {
+                let mut user =
+                    match user::User::lookup_user(FILEPATH, &params.user.clone().unwrap()) {
+                        Ok(mut user) => {
+                            match user::User::remove_language(&mut user, languages.clone()) {
+                                Ok(_) => {
+                                    println!(
+                                        "Successfully removed languages {:?} from user {:?}",
+                                        languages, params.user
+                                    );
+                                    let html = format!(
+                                    "<h1>Successfully removed languages {:?} from user: {:?}</h1>",
+                                    languages, params.user
+                                    );
+                                    let json = format!(
+                                        "Successfully removed languages {:?} from user: {:?}",
+                                        languages,
+                                        serde_json::to_string(&user)
+                                    );
+                                    // return Ok(Err(Json(content)));
+                                    return Ok(Ok(Html(html)));
+                                }
+                                Err(e) => {
+                                    let html = format!(
+                                        "<h1>Failed to remove languages {:?}: {:?}</h1>",
+                                        languages, e
+                                    );
+                                    let json = format!(
+                                        "Failed to remove languages {:?}: {:?}",
+                                        languages, e
+                                    );
+                                    // return Ok(Err(Json(json)))
+                                    return Ok(Ok(Html(html)));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let html = format!("<h1>Could not find user: {:?}</h1>", e);
+                            let json = format!("Could not find user: {:?}", e);
+                            // return Ok(Err(Json(json)))
+                            return Ok(Ok(Html(html)));
+                        }
+                    };
+            }
+        },
+        None => {
+            let html = format!("<h1>Invalid mode: {:?}</h1>", params.mode);
+            let json = format!("Invalid mode: {:?}", params.mode);
+            // return Ok(Err(Json(json)))
+            return Ok(Ok(Html(html)));
+        }
+    }
+
+    let json = format!("this is json.");
+    let html = format!("<h1>this is html. you reached the bottom of the function.</h1>");
+
+    // Ok(Err(Json(json)))
+    Ok(Ok(Html(html)))
 }
 
 fn authenticate(key: String) -> Result<(), Box<dyn Error>> {
