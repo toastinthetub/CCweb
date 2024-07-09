@@ -1,266 +1,424 @@
-use crate::user::{Language, User};
-use std::error::Error;
-use std::fmt;
-use std::{
-    net::{SocketAddr, ToSocketAddrs},
-    str::FromStr,
-    sync::Arc,
-};
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::Mutex,
-};
+use crate::user::{self, Language, User};
+use axum::{extract::Path, response::Html, routing::get, Form, Json, Router};
+use serde::{Deserialize, Serialize};
+use std::{env, error::Error, fmt, str::FromStr, vec};
+use tokio::net::lookup_host;
+
+pub const FILEPATH: &str = "./users.csv";
+
+#[derive(Deserialize, Debug)]
+struct PathParams {
+    mode: Option<CommandMode>,
+    key: Option<String>,
+    user: Option<String>,
+    languages: Option<String>,
+    discordid: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+enum CommandMode {
+    Create,
+    Destroy,
+    AppendLanguage,
+    RemoveLanguage,
+}
 
 #[derive(Debug)]
-pub struct ServerConnection {
-    connection: TcpStream,
+enum AuthError {
+    InvalidApiKey,
 }
 
-#[derive(Debug, Clone)]
-pub enum HttpMethod {
-    GET,
-    POST,
-    PUT,
-    DELETE,
-    HEAD,
-    OPTIONS,
-    PATCH,
-    TRACE,
-    CONNECT,
-}
-
-#[derive(Debug, Clone)]
-pub struct Request {
-    method: Option<HttpMethod>,
-    version: Option<String>,
-    host: Option<SocketAddr>,
-    accept: Option<Doctype>,
-    resource: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Response {
-    version: String,
-    doctype: Doctype,
-    length: i32,
-    content: String,
-}
-
-#[derive(Debug, Clone)]
-pub enum Doctype {
-    Html,
-    Json,
-}
-
-impl ServerConnection {
-    pub async fn empty() -> Result<Self, Box<dyn Error>> {
-        let connection = TcpStream::connect("127.0.0.1:8080").await?;
-        Ok(Self { connection })
-    }
-
-    pub async fn construct() -> Self {
-        todo!()
-    }
-
-    pub async fn handle_request(request: &str) {}
-}
-
-impl FromStr for HttpMethod {
-    type Err = &'static str;
-
-    fn from_str(method: &str) -> Result<Self, Self::Err> {
-        match method.to_uppercase().as_str() {
-            "GET" => Ok(HttpMethod::GET),
-            "POST" => Ok(HttpMethod::POST),
-            "PUT" => Ok(HttpMethod::PUT),
-            "DELETE" => Ok(HttpMethod::DELETE),
-            "HEAD" => Ok(HttpMethod::HEAD),
-            "OPTIONS" => Ok(HttpMethod::OPTIONS),
-            "PATCH" => Ok(HttpMethod::PATCH),
-            "TRACE" => Ok(HttpMethod::TRACE),
-            "CONNECT" => Ok(HttpMethod::CONNECT),
-            _ => Err("Invalid HTTP method"),
+impl fmt::Display for AuthError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            AuthError::InvalidApiKey => write!(f, "Invalid API key"),
         }
     }
 }
 
-// Custom error type for `FromStr` implementations
-#[derive(Debug)]
-pub struct ParseError(&'static str);
+impl Error for AuthError {}
 
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+pub async fn get_handler(Path(param): Path<(String, String)>) -> Html<String> {
+    println!("get handler was called");
+
+    let params = PathParams::from_get_list(axum::extract::Path(param.clone()));
+
+    match authenticate(params.as_ref().unwrap().key.clone().unwrap()) {
+        Ok(_) => {
+            println!(
+                "key {} accepted",
+                params.as_ref().unwrap().key.clone().unwrap()
+            );
+        }
+        Err(e) => {
+            let content = format!(
+                "<h1>Invalid key: {}</1>",
+                params.unwrap().key.clone().unwrap()
+            );
+            println!("{:}", e);
+            return Html(content.to_owned());
+        }
+    }
+
+    let user: Option<User> = match User::lookup_user(FILEPATH, &params.unwrap().user.unwrap()) {
+        Ok(user) => Some(user),
+        Err(e) => {
+            println!("Error: {:?}", e);
+            None
+        }
+    };
+
+    let html_content = match user {
+        Some(user) => {
+            println!("served user: {:?}", user);
+            format!(r#"<h1>REQUESTED USER: {:?}</h1>"#, user)
+        }
+        None => {
+            format!(r#"<h1>NO USER FOUND!</h1>"#)
+        }
+    };
+    // let html_content = format!(r#"<h1>{:?}</h1>"#, param);
+    Html(html_content)
+}
+
+pub async fn post_handler(
+    Path(param): Path<(String, String, String, String, String)>,
+) -> Html<String> /*Result<Result<Html<String>, Json<String>>, Box<dyn std::error::Error>>*/ {
+    let params = match PathParams::from_post_list(axum::extract::Path(param.clone())) {
+        Ok(params) => params,
+        Err(e) => {
+            println!("{:?}, {:?}", e, param);
+            let html = format!("bad params: {:?}", param);
+            return Html(html);
+        }
+    };
+    println!("{:?}", params);
+
+    let languages = match parse_languages(&params.languages.unwrap()) {
+        Ok(languages) => languages,
+        Err(e) => {
+            // println!("{:?}", languages);
+            vec![Language::BadLanguage]
+        }
+    };
+
+    match authenticate(params.key.clone().unwrap()) {
+        Ok(_) => {
+            println!("key {} accepted", params.key.clone().unwrap());
+        }
+        Err(e) => {
+            let content = format!("<h1>Invalid key: {}</1>", params.key.clone().unwrap());
+            println!("{:}", e);
+            // return Ok(Ok(Html(content.to_owned())));
+            return Html(content);
+        }
+    }
+
+    match params.mode {
+        Some(mode) => match mode {
+            CommandMode::Create => {
+                let user = match user::User::create_user(
+                    params.user.clone(),
+                    Some(languages),
+                    params.discordid,
+                ) {
+                    Ok(user) => {
+                        match user.save_to_csv(FILEPATH) {
+                            Ok(_) => {
+                                println!("successfully created user {:?}: {:?}", params.user, user);
+                                let html = format!(
+                                    "<h1>Successfully created user {:?}: {:?}</h1>",
+                                    params.user,
+                                    serde_json::to_string(&user)
+                                );
+                                let json = format!(
+                                    "Successfully created user: {:?}\n{:?}",
+                                    params.user,
+                                    serde_json::to_string(&user)
+                                );
+
+                                // return  Ok(Err(Json(json)));
+                                // return Ok(Ok(Html(html)));
+                                return Html(html);
+                            }
+                            Err(e) => {
+                                println!("failed to create user {:?}: {:?}", params.user, e);
+                                let html = format!(
+                                    "<h1>Failed to create user {:?}: {:?}</h1>",
+                                    params.user, e
+                                );
+                                let json =
+                                    format!("Failed to create user {:?}: {:?}", params.user, e);
+
+                                //return Ok(Err(Json(json)));
+                                // return Ok(Ok(Html(html)));
+                                return Html(html);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("failed to create user {:?}: {:?}", params.user, e);
+                        let html =
+                            format!("<h1>Failed to create user {:?}: {:?}</h1>", params.user, e);
+                        let json = format!("Failed to create user {:?}: {:?}", params.user, e);
+
+                        //return Ok(Err(Json(json)));
+                        // return Ok(Ok(Html(html)));
+                        return Html(html);
+                    }
+                };
+            }
+            CommandMode::Destroy => {
+                let user = match user::User::lookup_user(FILEPATH, &params.user.clone().unwrap()) {
+                    Ok(user) => {
+                        match user::User::remove_user(FILEPATH, &user.username) {
+                            Ok(_) => {
+                                println!("Successfully deleted user {:?}", user);
+                                let html = format!(
+                                    "<h1>Successfully deleted user: {:?}</h1>",
+                                    params.user
+                                );
+                                let json =
+                                    format!("Deleted user:\n{:?}", serde_json::to_string(&user));
+                                // return Ok(Err(Json(content)));
+                                // return Ok(Ok(Html(html)));
+                                return Html(html);
+                            }
+                            Err(e) => {
+                                println!("error: failed to delete user {:?}", user);
+                                let html = format!(
+                                    "<h1>Failed to delete user {:?}: {e}</h1>",
+                                    params.user
+                                );
+                                let json = format!("Failed to delete user {:?}, {e}", params.user);
+                                // return Ok(Err(Json(content)));
+                                // return Ok(Ok(Html(html)));
+                                return Html(html);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let html = format!("<h1>Could not find user: {:?}</h1>", e);
+                        let json = format!("Could not find user: {:?}", e);
+                        // return Ok(Err(Json(json)))
+                        // return Ok(Ok(Html(html)));
+                        return Html(html);
+                    }
+                };
+            }
+            CommandMode::AppendLanguage => {
+                let mut user =
+                    match user::User::lookup_user(FILEPATH, &params.user.clone().unwrap()) {
+                        Ok(mut user) => {
+                            match user::User::add_language(&mut user, languages.clone(), FILEPATH) {
+                                Ok(_) => {
+                                    println!(
+                                        "Successfully appended languages {:?} to user {:?}",
+                                        languages, params.user
+                                    );
+                                    let html = format!(
+                                    "<h1>Successfully appended languages {:?} to user: {:?}</h1>",
+                                    languages, params.user
+                                    );
+                                    let json = format!(
+                                        "Successfully appended languages {:?} to user: {:?}",
+                                        languages,
+                                        serde_json::to_string(&user)
+                                    );
+                                    // return Ok(Err(Json(content)));
+                                    // return Ok(Ok(Html(html)));
+                                    return Html(html);
+                                }
+                                Err(e) => {
+                                    let html = format!(
+                                        "<h1>Failed to append languages {:?}: {:?}</h1>",
+                                        languages, e
+                                    );
+                                    let json = format!(
+                                        "Failed to append languages {:?}: {:?}",
+                                        languages, e
+                                    );
+                                    // return Ok(Err(Json(json)))
+                                    // return Ok(Ok(Html(html)));
+                                    return Html(html);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let html = format!("<h1>Could not find user: {:?}</h1>", e);
+                            let json = format!("Could not find user: {:?}", e);
+                            // return Ok(Err(Json(json)))
+                            // return Ok(Ok(Html(html)));
+                            return Html(html);
+                        }
+                    };
+            }
+            CommandMode::RemoveLanguage => {
+                let mut user =
+                    match user::User::lookup_user(FILEPATH, &params.user.clone().unwrap()) {
+                        Ok(mut user) => {
+                            match user::User::remove_language(
+                                &mut user,
+                                languages.clone(),
+                                FILEPATH,
+                            ) {
+                                Ok(_) => {
+                                    println!(
+                                        "Successfully removed languages {:?} from user {:?}",
+                                        languages, params.user
+                                    );
+                                    let html = format!(
+                                    "<h1>Successfully removed languages {:?} from user: {:?}</h1>",
+                                    languages, params.user
+                                    );
+                                    let json = format!(
+                                        "Successfully removed languages {:?} from user: {:?}",
+                                        languages,
+                                        serde_json::to_string(&user)
+                                    );
+                                    // return Ok(Err(Json(content)));
+                                    // return Ok(Ok(Html(html)));
+                                    return Html(html);
+                                }
+                                Err(e) => {
+                                    let html = format!(
+                                        "<h1>Failed to remove languages {:?}: {:?}</h1>",
+                                        languages, e
+                                    );
+                                    let json = format!(
+                                        "Failed to remove languages {:?}: {:?}",
+                                        languages, e
+                                    );
+                                    // return Ok(Err(Json(json)))
+                                    // return Ok(Ok(Html(html)));
+                                    return Html(html);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let html = format!("<h1>Could not find user: {:?}</h1>", e);
+                            let json = format!("Could not find user: {:?}", e);
+                            // return Ok(Err(Json(json)))
+                            // return Ok(Ok(Html(html)));
+                            return Html(html);
+                        }
+                    };
+            }
+        },
+        None => {
+            let html = format!("<h1>Invalid mode: {:?}</h1>", params.mode);
+            let json = format!("Invalid mode: {:?}", params.mode);
+            // return Ok(Err(Json(json)))
+            // return Ok(Ok(Html(html)));
+            return Html(html);
+        }
+    }
+
+    let json = format!("this is json.");
+    let html = format!("<h1>this is html. you reached the bottom of the function.</h1>");
+
+    // Ok(Err(Json(json)))
+    // Ok(Ok(Html(html)))
+    Html(html)
+}
+
+fn authenticate(key: String) -> Result<(), Box<dyn Error>> {
+    dotenv::dotenv().ok();
+
+    let api_key = env::var("API_KEY").expect("API_KEY not set in .env file");
+
+    if key == api_key {
+        Ok(())
+    } else {
+        Err(Box::new(AuthError::InvalidApiKey))
     }
 }
 
-impl Error for ParseError {}
+impl PathParams {
+    fn from_get_list(
+        Path(params): Path<(String, String)>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let key: String = params.0;
+        let user: String = params.1;
+        Ok(Self {
+            mode: None,
+            key: Some(key),
+            user: Some(user),
+            languages: None,
+            discordid: None,
+        })
+    }
+    fn from_post_list(
+        Path(params): Path<(String, String, String, String, String)>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mode: String = params.1;
+        let mode = mode.parse()?;
+        let key: String = params.0;
+        let user: String = params.2;
+        let languages: String = params.3;
+        let discordid: String = params.4;
+        Ok(Self {
+            mode: Some(mode),
+            key: Some(key),
+            user: Some(user),
+            languages: Some(languages),
+            discordid: Some(discordid),
+        })
+    }
+}
 
-impl FromStr for Doctype {
-    type Err = ParseError;
+impl FromStr for CommandMode {
+    type Err = ParseCommandModeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            s if s.contains("application/json") => Ok(Doctype::Json),
-            s if s.contains("text/html") => Ok(Doctype::Html),
-            _ => Err(ParseError("Invalid Doctype")),
+        match s.to_lowercase().as_str() {
+            "c" => Ok(CommandMode::Create),
+            "d" => Ok(CommandMode::Destroy),
+            "a" => Ok(CommandMode::AppendLanguage),
+            "r" => Ok(CommandMode::RemoveLanguage),
+            _ => Err(ParseCommandModeError),
         }
     }
 }
 
-impl Request {
-    pub fn parse(request: String) -> Result<Self, Box<dyn Error>> {
-        let lines: Vec<&str> = request.lines().collect();
-        let first_line = lines.get(0).ok_or("Request is empty")?;
-        let parts: Vec<&str> = first_line.split_whitespace().collect();
+#[derive(Debug)]
+struct ParseCommandModeError;
 
-        if parts.len() < 3 {
-            return Err("Invalid request line".into());
+impl fmt::Display for ParseCommandModeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid command mode")
+    }
+}
+
+impl std::error::Error for ParseCommandModeError {}
+
+fn parse_languages(languages_str: &str) -> Result<Vec<Language>, &str> {
+    let mut languages_strs = Vec::new();
+    let mut languages = Vec::new();
+    for language in languages_str.split('|') {
+        if language != "" {
+            languages_strs.push(language);
+            println!("{}", language)
         }
-
-        let method = HttpMethod::from_str(parts[0])?;
-        let resource = if parts[1] == "/" {
-            println!("No resource requested!");
-            None
-        } else {
-            Some(parts[1].to_string())
+    }
+    for language in languages_strs {
+        let language = match Language::from_str(language) {
+            Ok(lang) => languages.push(lang),
+            Err(_) => {
+                println!("{:?}", language);
+                return Err(language);
+            }
         };
-        let version = parts[2]
-            .split_once('/')
-            .ok_or("Invalid HTTP version")?
-            .1
-            .to_string();
-
-        let host_line = lines.get(1).ok_or("Host line missing")?;
-        let host_str = host_line.split_once(' ').ok_or("Invalid host line")?.1;
-        let host = host_str
-            .to_socket_addrs()?
-            .next()
-            .ok_or("Invalid host address")?;
-
-        let mut accept = Doctype::Html;
-        for line in &lines[1..] {
-            if line.starts_with("Accept:") {
-                accept = Doctype::from_str(
-                    line.split_once(':')
-                        .ok_or("Invalid Accept header")?
-                        .1
-                        .trim(),
-                )
-                .unwrap_or(Doctype::Html);
-            }
-        }
-
-        println!(
-            "METHOD: {:?}\nVERSION: {}\nHOST: {:?}\nDOCTYPE: {:?}\nRESOURCE: {:?}",
-            method, version, host, accept, resource
-        );
-
-        Ok(Self {
-            method: Some(method),
-            version: Some(version),
-            host: Some(host),
-            accept: Some(accept),
-            resource,
-        })
+        println!("{:?}", language)
     }
-    /*
-    pub fn shart(request: String) -> Result<Self, Box<dyn std::error::Error>> {
-        // ignore this whole function
-        // this was supposed to be a better parse method but it doesnt work for some reaoson
-        let mut method: Option<HttpMethod> = None;
-        let mut resource: Option<String> = None;
-        let mut version: Option<String> = None;
-        let mut host: Option<SocketAddr> = None;
-        let mut accept: Option<Doctype> = None;
-
-        // why did i do this
-        let mut start_line_parsed = false;
-
-        for line in request.lines() {
-            // this shit should never panic on split but we do this anyway
-            if !line.is_empty() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-
-                // Only parse the start line once
-                if !start_line_parsed && parts.len() == 3 && parts[2].starts_with("HTTP/") {
-                    method = Some(HttpMethod::from_str(parts[0]).unwrap_or(HttpMethod::GET));
-                    resource = Some(parts[1].to_string());
-                    version = Some(parts[2][5..].to_string()); // Extract version after "HTTP/"
-                    start_line_parsed = true; // start line now parsed
-                }
-                // Host header
-                else if line.starts_with("Host:") {
-                    let host_str = line
-                        .split_once(": ")
-                        .map(|(_, v)| v)
-                        .unwrap_or("0.0.0.0:8080");
-                    host = Some(host_str.to_socket_addrs()?.next().ok_or("Invalid host")?);
-                }
-                // Accept header
-                else if line.starts_with("Accept:") {
-                    let doctype_str = line.split_once(": ").map(|(_, v)| v).unwrap_or("text/html"); // Get the first value only
-                    accept = Some(Doctype::from_str(doctype_str).unwrap_or(Doctype::Html));
-                }
-            }
-        }
-
-        if let (Some(method), Some(resource), Some(version), Some(host)) =
-            (method, resource, version, host)
-        {
-            println!(
-                "METHOD: {:?}\nRESOURCE: {:?}\nVERSION: {:?}\nHOST: {:?}, DOCTYPE: {:?}\n",
-                method, resource, version, host, accept
-            );
-
-            Ok(Self {
-                method: Some(method),
-                version: Some(version),
-                host: Some(host),
-                accept,
-                resource: Some(resource),
-            })
-        } else {
-            Err("Missing required fields in HTTP request".into())
-        }
-    } */
-}
-
-impl Response {
-    pub fn yousuck(request: Request) -> Result<Self, Box<dyn std::error::Error>> {
-        let version = request.version.unwrap();
-        let doctype: Doctype = Doctype::Json;
-        let mut length: i32 = 0;
-        let mut content: String = String::new();
-
-        let requested_user = request.resource.unwrap();
-        let mut resource: Option<User> = None;
-
-        match request.method.unwrap() {
-            HttpMethod::GET => {
-                // request route is USER ID, which will be used to lookup a user.
-                if let Ok(Some(loaded_user)) = User::lookup_user("users.csv", &requested_user) {
-                    println!("FOUND USER: {:?}", loaded_user);
-                    resource = Some(loaded_user);
-                }
-            }
-            HttpMethod::POST => {
-                // this will contain user ID, username, password,
-            }
-            HttpMethod::DELETE => {
-                println!("todo!");
-                todo!()
-            }
-            _ => {
-                println!("bad method lol")
-            }
-        }
-
-        Ok(Self {
-            version,
-            doctype,
-            length,
-            content,
-        })
-    }
+    // for language in languages_strs {
+    //     match Language::from_str(language) {
+    //         Ok(lang) => languages.push(lang),
+    //         Err(_) => {
+    //             println!("{:?}", language);
+    //             return Err(language);
+    //         }
+    //     }
+    // }
+    Ok(languages)
 }

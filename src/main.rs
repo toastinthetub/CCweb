@@ -1,42 +1,38 @@
 mod server;
 mod user;
 
-use std::net::SocketAddr;
+use axum::handler;
 
-use crate::server::{HttpMethod, ServerConnection};
-
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-
-const INDEX: &str = include_str!("./index.html");
-
-async fn handle_client(mut stream: TcpStream, addr: SocketAddr) {
-    let mut buffer = [0; 1024];
-    stream.read(&mut buffer).await.unwrap();
-    println!("------------------- REQUEST! -------------------");
-    match std::str::from_utf8(&buffer) {
-        Ok(request_str) => {
-            println!("Request: {}", request_str);
-            let request = server::Request::parse(request_str.to_string()).unwrap();
-            println!("\n\n DEBUG INFO:\n------------------- -------- -------------------");
-            println!("{:?}", request);
-        }
-        Err(e) => println!("Failed to convert request to string: {}", e),
-    }
-
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body>{}</body></html>",
-        INDEX
-    );
-    stream.write_all(response.as_bytes()).await.unwrap();
-}
+use axum::{
+    response::Html,
+    routing::{get, post},
+    Router,
+};
 
 #[tokio::main]
 async fn main() {
-    let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    let languages: Vec<crate::user::Language> =
+        vec![crate::user::Language::C, crate::user::Language::Rust];
 
-    loop {
-        let (stream, addr) = listener.accept().await.unwrap();
-        tokio::spawn(handle_client(stream, addr));
-    }
+    // let user = crate::user::User::create_user(
+    //     Some("fork".to_owned()),
+    //     Some(languages),
+    //     Some("ForkInToaster".to_owned()),
+    // )
+    // .unwrap();
+
+    // println!("{:?}", user);
+    // user.save_to_csv(crate::server::FILEPATH).unwrap();
+
+    let app = Router::new()
+        .route(
+            "/:key/:mode/:user/:languages/:discordid",
+            get(crate::server::post_handler).post(crate::server::post_handler),
+        )
+        .route("/:key/:user/", get(crate::server::get_handler));
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!("listening on {}", listener.local_addr().unwrap());
+
+    axum::serve(listener, app).await.unwrap();
 }
