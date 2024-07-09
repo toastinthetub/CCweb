@@ -1,20 +1,20 @@
-use bcrypt::{hash, verify, BcryptError, DEFAULT_COST};
+use serde::{Deserialize, Serialize};
+use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
-use std::path::Path;
-use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
     username: String,
-    password_hash: String,
     languages: Vec<Language>,
+    discord_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Language {
     C,
     CPP,
+    Lua,
     Rust,
     Java,
     Kotlin,
@@ -22,14 +22,36 @@ pub enum Language {
     TypeScript,
 }
 
+#[derive(Debug)]
+pub enum DatabaseError {
+    MissingUsername,
+    UserNotFound,
+    IoError(io::Error),
+}
+
+impl From<io::Error> for DatabaseError {
+    fn from(error: io::Error) -> Self {
+        DatabaseError::IoError(error)
+    }
+}
+
 impl User {
-    pub fn new(username: String, password: String) -> Result<Self, Box<dyn std::error::Error>> {
-        let password_hash = hash(password, DEFAULT_COST)?;
+    pub fn create_user(
+        username: Option<String>,
+        languages: Option<Vec<Language>>,
+        discord_id: Option<String>,
+    ) -> Result<Self, DatabaseError> {
+        let username = match username {
+            Some(u) => u,
+            None => return Err(DatabaseError::MissingUsername),
+        };
+        let languages = languages.unwrap_or_default();
+        let discord_id = discord_id.unwrap_or_default();
 
         Ok(User {
             username,
-            password_hash,
-            languages: Vec::new(),
+            languages,
+            discord_id,
         })
     }
 
@@ -43,11 +65,38 @@ impl User {
         self.languages.retain(|l| l != language);
     }
 
-    pub fn authenticate(&self, password: &str) -> bool {
-        match verify(password, &self.password_hash) {
-            Ok(valid) => valid,
-            Err(_) => false,
+    pub fn lookup_user(file_path: &str, username: &str) -> Result<User, DatabaseError> {
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line?;
+            let parts: Vec<&str> = line.split(',').collect();
+            if parts.len() >= 3 && parts[0] == username {
+                let username = parts[0].to_string();
+                let languages = parts[1]
+                    .split('|')
+                    .filter_map(|s| match s {
+                        "C" => Some(Language::C),
+                        "CPP" => Some(Language::CPP),
+                        "Lua" => Some(Language::Lua),
+                        "Rust" => Some(Language::Rust),
+                        "Java" => Some(Language::Java),
+                        "Kotlin" => Some(Language::Kotlin),
+                        "JavaScript" => Some(Language::JavaScript),
+                        "TypeScript" => Some(Language::TypeScript),
+                        _ => None,
+                    })
+                    .collect();
+                let discord_id = parts[2].to_string();
+                return Ok(User {
+                    username,
+                    languages,
+                    discord_id,
+                });
+            }
         }
+        Err(DatabaseError::UserNotFound)
     }
 
     pub fn save_to_csv(&self, file_path: &str) -> io::Result<()> {
@@ -59,53 +108,38 @@ impl User {
         let line = format!(
             "{},{},{}\n",
             self.username,
-            self.password_hash,
-            languages.join("|")
+            languages.join("|"),
+            self.discord_id,
         );
         file.write_all(line.as_bytes())
     }
 
-    pub fn lookup_user(file_path: &str, username: &str) -> io::Result<Option<User>> {
+    pub fn remove_user(file_path: &str, username: &str) -> io::Result<()> {
         let file = File::open(file_path)?;
         let reader = BufReader::new(file);
-
-        for line in reader.lines() {
-            let line = line?;
-            let parts: Vec<&str> = line.split(',').collect();
-            if parts.len() >= 3 && parts[0] == username {
-                let username = parts[0].to_string();
-                let password_hash = parts[1].to_string();
-                let languages = parts[2]
-                    .split('|')
-                    .filter_map(|s| match s {
-                        "C" => Some(Language::C),
-                        "CPP" => Some(Language::CPP),
-                        "Rust" => Some(Language::Rust),
-                        "Java" => Some(Language::Java),
-                        "Kotlin" => Some(Language::Kotlin),
-                        "JavaScript" => Some(Language::JavaScript),
-                        "TypeScript" => Some(Language::TypeScript),
-                        _ => None,
-                    })
-                    .collect();
-                return Ok(Some(User {
-                    username,
-                    password_hash,
-                    languages,
-                }));
-            }
+        let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
+        let filtered_lines: Vec<String> = lines
+            .into_iter()
+            .filter(|line| {
+                let parts: Vec<&str> = line.split(',').collect();
+                parts.len() < 3 || parts[0] != username
+            })
+            .collect();
+        let mut file = File::create(file_path)?;
+        for line in filtered_lines {
+            writeln!(file, "{}", line)?;
         }
-        Ok(None)
+        Ok(())
     }
 
     pub fn to_string(&self) -> String {
         let languages_str: Vec<String> =
             self.languages.iter().map(|l| format!("{:?}", l)).collect();
         format!(
-            "User {{ username: {}, password_hash: {}, languages: [{}] }}",
+            "User {{ username: {}, languages: [{}], discord_id: {} }}",
             self.username,
-            self.password_hash,
-            languages_str.join(", ")
+            languages_str.join(", "),
+            self.discord_id
         )
     }
 }
