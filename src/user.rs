@@ -21,6 +21,7 @@ pub enum Language {
     Kotlin,
     JavaScript,
     TypeScript,
+    BadLanguage,
 }
 
 #[derive(Debug)]
@@ -76,23 +77,29 @@ impl User {
 
     pub fn add_language(
         &mut self,
-        language: Vec<Language>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        for languages in language {
-            if !self.languages.contains(&languages) {
-                self.languages.push(languages);
+        new_languages: Vec<Language>,
+        file_path: &str,
+    ) -> Result<(), DatabaseError> {
+        for language in new_languages {
+            if !self.languages.contains(&language) {
+                self.languages.push(language);
             }
         }
+
+        self.update_user(file_path)?;
+
         Ok(())
     }
 
     pub fn remove_language(
         &mut self,
-        language: Vec<Language>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        for languages in language {
-            self.languages.retain(|l| *l != languages);
-        }
+        languages_to_remove: Vec<Language>,
+        file_path: &str,
+    ) -> Result<(), DatabaseError> {
+        self.languages.retain(|l| !languages_to_remove.contains(l));
+
+        self.update_user(file_path)?;
+
         Ok(())
     }
 
@@ -148,7 +155,7 @@ impl User {
             .open(file_path)?;
         let languages: Vec<String> = self.languages.iter().map(|l| format!("{:?}", l)).collect();
         let line = format!(
-            "{},{},{}\n",
+            "{},{},{}",
             self.username,
             languages.join("|"),
             self.discord_id,
@@ -184,5 +191,54 @@ impl User {
             languages_str.join(", "),
             self.discord_id
         )
+    }
+    fn update_user(&self, file_path: &str) -> Result<(), DatabaseError> {
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+
+        let mut lines: Vec<String> = reader.lines().map(|line| line.unwrap()).collect();
+        let mut found = false;
+
+        for line in lines.iter_mut() {
+            let parts: Vec<&str> = line.split(',').collect();
+            if parts.len() >= 1 && parts[0] == self.username {
+                *line = format!(
+                    "{},{},{}\n",
+                    self.username,
+                    self.languages_str(),
+                    self.discord_id
+                );
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            let mut file = OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(file_path)?;
+            let line = format!(
+                "{},{},{}\n",
+                self.username,
+                self.languages_str(),
+                self.discord_id,
+            );
+            file.write_all(line.as_bytes())?;
+        } else {
+            let mut file = File::create(file_path)?;
+            for line in lines {
+                writeln!(file, "{}", line)?;
+            }
+        }
+
+        Ok(())
+    }
+    fn languages_str(&self) -> String {
+        self.languages
+            .iter()
+            .map(|l| format!("{:?}", l))
+            .collect::<Vec<_>>()
+            .join("|")
     }
 }

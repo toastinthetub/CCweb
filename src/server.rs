@@ -83,13 +83,22 @@ pub async fn get_handler(Path(param): Path<(String, String)>) -> Html<String> {
 
 pub async fn post_handler(
     Path(param): Path<(String, String, String, String, String)>,
-) -> Result<Result<Html<String>, Json<String>>, Box<dyn std::error::Error>> {
-    let params = PathParams::from_post_list(axum::extract::Path(param.clone())).unwrap();
+) -> Html<String> /*Result<Result<Html<String>, Json<String>>, Box<dyn std::error::Error>>*/ {
+    let params = match PathParams::from_post_list(axum::extract::Path(param.clone())) {
+        Ok(params) => params,
+        Err(e) => {
+            println!("{:?}, {:?}", e, param);
+            let html = format!("bad params: {:?}", param);
+            return Html(html);
+        }
+    };
+    println!("{:?}", params);
 
     let languages = match parse_languages(&params.languages.unwrap()) {
         Ok(languages) => languages,
-        Err(_) => {
-            vec![Language::C]
+        Err(e) => {
+            // println!("{:?}", languages);
+            vec![Language::BadLanguage]
         }
     };
 
@@ -100,7 +109,8 @@ pub async fn post_handler(
         Err(e) => {
             let content = format!("<h1>Invalid key: {}</1>", params.key.clone().unwrap());
             println!("{:}", e);
-            return Ok(Ok(Html(content.to_owned())));
+            // return Ok(Ok(Html(content.to_owned())));
+            return Html(content);
         }
     }
 
@@ -113,20 +123,38 @@ pub async fn post_handler(
                     params.discordid,
                 ) {
                     Ok(user) => {
-                        println!("successfully created user {:?}: {:?}", params.user, user);
-                        let html = format!(
-                            "<h1>Successfully created user {:?}: {:?}</h1>",
-                            params.user,
-                            serde_json::to_string(&user)
-                        );
-                        let json = format!(
-                            "Successfully created user: {:?}\n{:?}",
-                            params.user,
-                            serde_json::to_string(&user)
-                        );
+                        match user.save_to_csv(FILEPATH) {
+                            Ok(_) => {
+                                println!("successfully created user {:?}: {:?}", params.user, user);
+                                let html = format!(
+                                    "<h1>Successfully created user {:?}: {:?}</h1>",
+                                    params.user,
+                                    serde_json::to_string(&user)
+                                );
+                                let json = format!(
+                                    "Successfully created user: {:?}\n{:?}",
+                                    params.user,
+                                    serde_json::to_string(&user)
+                                );
 
-                        // return  Ok(Err(Json(json)));
-                        return Ok(Ok(Html(html)));
+                                // return  Ok(Err(Json(json)));
+                                // return Ok(Ok(Html(html)));
+                                return Html(html);
+                            }
+                            Err(e) => {
+                                println!("failed to create user {:?}: {:?}", params.user, e);
+                                let html = format!(
+                                    "<h1>Failed to create user {:?}: {:?}</h1>",
+                                    params.user, e
+                                );
+                                let json =
+                                    format!("Failed to create user {:?}: {:?}", params.user, e);
+
+                                //return Ok(Err(Json(json)));
+                                // return Ok(Ok(Html(html)));
+                                return Html(html);
+                            }
+                        }
                     }
                     Err(e) => {
                         println!("failed to create user {:?}: {:?}", params.user, e);
@@ -135,12 +163,13 @@ pub async fn post_handler(
                         let json = format!("Failed to create user {:?}: {:?}", params.user, e);
 
                         //return Ok(Err(Json(json)));
-                        return Ok(Ok(Html(html)));
+                        // return Ok(Ok(Html(html)));
+                        return Html(html);
                     }
                 };
             }
             CommandMode::Destroy => {
-                match user::User::lookup_user(FILEPATH, &params.user.clone().unwrap()) {
+                let user = match user::User::lookup_user(FILEPATH, &params.user.clone().unwrap()) {
                     Ok(user) => {
                         match user::User::remove_user(FILEPATH, &user.username) {
                             Ok(_) => {
@@ -152,7 +181,8 @@ pub async fn post_handler(
                                 let json =
                                     format!("Deleted user:\n{:?}", serde_json::to_string(&user));
                                 // return Ok(Err(Json(content)));
-                                return Ok(Ok(Html(html)));
+                                // return Ok(Ok(Html(html)));
+                                return Html(html);
                             }
                             Err(e) => {
                                 println!("error: failed to delete user {:?}", user);
@@ -162,7 +192,8 @@ pub async fn post_handler(
                                 );
                                 let json = format!("Failed to delete user {:?}, {e}", params.user);
                                 // return Ok(Err(Json(content)));
-                                return Ok(Ok(Html(html)));
+                                // return Ok(Ok(Html(html)));
+                                return Html(html);
                             }
                         }
                     }
@@ -170,7 +201,8 @@ pub async fn post_handler(
                         let html = format!("<h1>Could not find user: {:?}</h1>", e);
                         let json = format!("Could not find user: {:?}", e);
                         // return Ok(Err(Json(json)))
-                        return Ok(Ok(Html(html)));
+                        // return Ok(Ok(Html(html)));
+                        return Html(html);
                     }
                 };
             }
@@ -178,7 +210,7 @@ pub async fn post_handler(
                 let mut user =
                     match user::User::lookup_user(FILEPATH, &params.user.clone().unwrap()) {
                         Ok(mut user) => {
-                            match user::User::add_language(&mut user, languages.clone()) {
+                            match user::User::add_language(&mut user, languages.clone(), FILEPATH) {
                                 Ok(_) => {
                                     println!(
                                         "Successfully appended languages {:?} to user {:?}",
@@ -194,7 +226,8 @@ pub async fn post_handler(
                                         serde_json::to_string(&user)
                                     );
                                     // return Ok(Err(Json(content)));
-                                    return Ok(Ok(Html(html)));
+                                    // return Ok(Ok(Html(html)));
+                                    return Html(html);
                                 }
                                 Err(e) => {
                                     let html = format!(
@@ -206,7 +239,8 @@ pub async fn post_handler(
                                         languages, e
                                     );
                                     // return Ok(Err(Json(json)))
-                                    return Ok(Ok(Html(html)));
+                                    // return Ok(Ok(Html(html)));
+                                    return Html(html);
                                 }
                             }
                         }
@@ -214,7 +248,8 @@ pub async fn post_handler(
                             let html = format!("<h1>Could not find user: {:?}</h1>", e);
                             let json = format!("Could not find user: {:?}", e);
                             // return Ok(Err(Json(json)))
-                            return Ok(Ok(Html(html)));
+                            // return Ok(Ok(Html(html)));
+                            return Html(html);
                         }
                     };
             }
@@ -222,7 +257,11 @@ pub async fn post_handler(
                 let mut user =
                     match user::User::lookup_user(FILEPATH, &params.user.clone().unwrap()) {
                         Ok(mut user) => {
-                            match user::User::remove_language(&mut user, languages.clone()) {
+                            match user::User::remove_language(
+                                &mut user,
+                                languages.clone(),
+                                FILEPATH,
+                            ) {
                                 Ok(_) => {
                                     println!(
                                         "Successfully removed languages {:?} from user {:?}",
@@ -238,7 +277,8 @@ pub async fn post_handler(
                                         serde_json::to_string(&user)
                                     );
                                     // return Ok(Err(Json(content)));
-                                    return Ok(Ok(Html(html)));
+                                    // return Ok(Ok(Html(html)));
+                                    return Html(html);
                                 }
                                 Err(e) => {
                                     let html = format!(
@@ -250,7 +290,8 @@ pub async fn post_handler(
                                         languages, e
                                     );
                                     // return Ok(Err(Json(json)))
-                                    return Ok(Ok(Html(html)));
+                                    // return Ok(Ok(Html(html)));
+                                    return Html(html);
                                 }
                             }
                         }
@@ -258,7 +299,8 @@ pub async fn post_handler(
                             let html = format!("<h1>Could not find user: {:?}</h1>", e);
                             let json = format!("Could not find user: {:?}", e);
                             // return Ok(Err(Json(json)))
-                            return Ok(Ok(Html(html)));
+                            // return Ok(Ok(Html(html)));
+                            return Html(html);
                         }
                     };
             }
@@ -267,7 +309,8 @@ pub async fn post_handler(
             let html = format!("<h1>Invalid mode: {:?}</h1>", params.mode);
             let json = format!("Invalid mode: {:?}", params.mode);
             // return Ok(Err(Json(json)))
-            return Ok(Ok(Html(html)));
+            // return Ok(Ok(Html(html)));
+            return Html(html);
         }
     }
 
@@ -275,7 +318,8 @@ pub async fn post_handler(
     let html = format!("<h1>this is html. you reached the bottom of the function.</h1>");
 
     // Ok(Err(Json(json)))
-    Ok(Ok(Html(html)))
+    // Ok(Ok(Html(html)))
+    Html(html)
 }
 
 fn authenticate(key: String) -> Result<(), Box<dyn Error>> {
@@ -307,9 +351,9 @@ impl PathParams {
     fn from_post_list(
         Path(params): Path<(String, String, String, String, String)>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mode: String = params.0;
+        let mode: String = params.1;
         let mode = mode.parse()?;
-        let key: String = params.1;
+        let key: String = params.0;
         let user: String = params.2;
         let languages: String = params.3;
         let discordid: String = params.4;
@@ -348,13 +392,33 @@ impl fmt::Display for ParseCommandModeError {
 
 impl std::error::Error for ParseCommandModeError {}
 
-fn parse_languages(languages_str: &str) -> Result<Vec<Language>, ()> {
+fn parse_languages(languages_str: &str) -> Result<Vec<Language>, &str> {
+    let mut languages_strs = Vec::new();
     let mut languages = Vec::new();
     for language in languages_str.split('|') {
-        match Language::from_str(language) {
-            Ok(lang) => languages.push(lang),
-            Err(_) => return Err(()),
+        if language != "" {
+            languages_strs.push(language);
+            println!("{}", language)
         }
     }
+    for language in languages_strs {
+        let language = match Language::from_str(language) {
+            Ok(lang) => languages.push(lang),
+            Err(_) => {
+                println!("{:?}", language);
+                return Err(language);
+            }
+        };
+        println!("{:?}", language)
+    }
+    // for language in languages_strs {
+    //     match Language::from_str(language) {
+    //         Ok(lang) => languages.push(lang),
+    //         Err(_) => {
+    //             println!("{:?}", language);
+    //             return Err(language);
+    //         }
+    //     }
+    // }
     Ok(languages)
 }
