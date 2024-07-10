@@ -38,7 +38,7 @@ impl fmt::Display for AuthError {
 
 impl Error for AuthError {}
 
-pub async fn get_handler(Path(param): Path<(String, String)>) -> Html<String> {
+pub async fn get_handler(Path(param): Path<(String, String)>) -> Json<String> {
     println!("get handler was called");
 
     let params = PathParams::from_get_list(axum::extract::Path(param.clone()));
@@ -56,7 +56,8 @@ pub async fn get_handler(Path(param): Path<(String, String)>) -> Html<String> {
                 params.unwrap().key.clone().unwrap()
             );
             println!("{:}", e);
-            return Html(content.to_owned());
+            // return Html(content.to_owned());
+            return Json(content);
         }
     }
 
@@ -78,18 +79,22 @@ pub async fn get_handler(Path(param): Path<(String, String)>) -> Html<String> {
         }
     };
     // let html_content = format!(r#"<h1>{:?}</h1>"#, param);
-    Html(html_content)
+    // Html(html_content)
+    let json_content = format!("{:?}", param);
+    return Json(json_content);
 }
 
 pub async fn post_handler(
     Path(param): Path<(String, String, String, String, String)>,
-) -> Html<String> /*Result<Result<Html<String>, Json<String>>, Box<dyn std::error::Error>>*/ {
+) -> Json<String> /*Result<Result<Html<String>, Json<String>>, Box<dyn std::error::Error>>*/ {
     let params = match PathParams::from_post_list(axum::extract::Path(param.clone())) {
         Ok(params) => params,
         Err(e) => {
             println!("{:?}, {:?}", e, param);
-            let html = format!("bad params: {:?}", param);
-            return Html(html);
+            // let html = format!("bad params: {:?}", param);
+            let json = format!("bad params: {:?}", param);
+            // return Html(html);
+            return Json(json);
         }
     };
     println!("{:?}", params);
@@ -107,10 +112,11 @@ pub async fn post_handler(
             println!("key {} accepted", params.key.clone().unwrap());
         }
         Err(e) => {
-            let content = format!("<h1>Invalid key: {}</1>", params.key.clone().unwrap());
+            // let html = format!("<h1>Invalid key: {}</1>", params.key.clone().unwrap());
+            let json = format!("Error: invalid key: {:?}", params.key.clone().unwrap());
             println!("{:}", e);
-            // return Ok(Ok(Html(content.to_owned())));
-            return Html(content);
+            // return Html(html);
+            return Json(json);
         }
     }
 
@@ -139,7 +145,8 @@ pub async fn post_handler(
 
                                 // return  Ok(Err(Json(json)));
                                 // return Ok(Ok(Html(html)));
-                                return Html(html);
+                                // return Html(html);
+                                return Json(json);
                             }
                             Err(e) => {
                                 println!("failed to create user {:?}: {:?}", params.user, e);
@@ -152,7 +159,8 @@ pub async fn post_handler(
 
                                 //return Ok(Err(Json(json)));
                                 // return Ok(Ok(Html(html)));
-                                return Html(html);
+                                // return Html(html);
+                                return Json(json);
                             }
                         }
                     }
@@ -164,7 +172,8 @@ pub async fn post_handler(
 
                         //return Ok(Err(Json(json)));
                         // return Ok(Ok(Html(html)));
-                        return Html(html);
+                        // return Html(html);
+                        return Json(json);
                     }
                 };
             }
@@ -182,7 +191,8 @@ pub async fn post_handler(
                                     format!("Deleted user:\n{:?}", serde_json::to_string(&user));
                                 // return Ok(Err(Json(content)));
                                 // return Ok(Ok(Html(html)));
-                                return Html(html);
+                                // return Html(html);
+                                return Json(json);
                             }
                             Err(e) => {
                                 println!("error: failed to delete user {:?}", user);
@@ -193,7 +203,8 @@ pub async fn post_handler(
                                 let json = format!("Failed to delete user {:?}, {e}", params.user);
                                 // return Ok(Err(Json(content)));
                                 // return Ok(Ok(Html(html)));
-                                return Html(html);
+                                // return Html(html);
+                                return Json(json);
                             }
                         }
                     }
@@ -202,7 +213,8 @@ pub async fn post_handler(
                         let json = format!("Could not find user: {:?}", e);
                         // return Ok(Err(Json(json)))
                         // return Ok(Ok(Html(html)));
-                        return Html(html);
+                        // return Html(html);
+                        return Json(json);
                     }
                 };
             }
@@ -227,7 +239,8 @@ pub async fn post_handler(
                                     );
                                     // return Ok(Err(Json(content)));
                                     // return Ok(Ok(Html(html)));
-                                    return Html(html);
+                                    // return Html(html);
+                                    return Json(json);
                                 }
                                 Err(e) => {
                                     let html = format!(
@@ -240,16 +253,17 @@ pub async fn post_handler(
                                     );
                                     // return Ok(Err(Json(json)))
                                     // return Ok(Ok(Html(html)));
-                                    return Html(html);
+                                    // return Html(html);
+                                    return Json(json);
                                 }
                             }
                         }
                         Err(e) => {
                             let html = format!("<h1>Could not find user: {:?}</h1>", e);
                             let json = format!("Could not find user: {:?}", e);
-                            // return Ok(Err(Json(json)))
+                            return Json(json);
                             // return Ok(Ok(Html(html)));
-                            return Html(html);
+                            // return Html(html);
                         }
                     };
             }
@@ -278,7 +292,8 @@ pub async fn post_handler(
                                     );
                                     // return Ok(Err(Json(content)));
                                     // return Ok(Ok(Html(html)));
-                                    return Html(html);
+                                    // return Html(html);
+                                    return Json(json);
                                 }
                                 Err(e) => {
                                     let html = format!(
@@ -291,7 +306,8 @@ pub async fn post_handler(
                                     );
                                     // return Ok(Err(Json(json)))
                                     // return Ok(Ok(Html(html)));
-                                    return Html(html);
+                                    // return Html(html);
+                                    return Json(json);
                                 }
                             }
                         }
@@ -300,7 +316,8 @@ pub async fn post_handler(
                             let json = format!("Could not find user: {:?}", e);
                             // return Ok(Err(Json(json)))
                             // return Ok(Ok(Html(html)));
-                            return Html(html);
+                            // return Html(html);
+                            return Json(json);
                         }
                     };
             }
@@ -310,7 +327,8 @@ pub async fn post_handler(
             let json = format!("Invalid mode: {:?}", params.mode);
             // return Ok(Err(Json(json)))
             // return Ok(Ok(Html(html)));
-            return Html(html);
+            // return Html(html);
+            return Json(json);
         }
     }
 
@@ -319,7 +337,8 @@ pub async fn post_handler(
 
     // Ok(Err(Json(json)))
     // Ok(Ok(Html(html)))
-    Html(html)
+    // Html(html)
+    return Json(json);
 }
 
 fn authenticate(key: String) -> Result<(), Box<dyn Error>> {
