@@ -172,7 +172,7 @@ impl PostRequest {
         stdout.flush().unwrap();
         std::io::stdin()
             .read_line(&mut discordid)
-            .expect("failed to read for some reason");
+            .expect("kill yourself");
 
         let languages_str: String = languages_str
             .chars()
