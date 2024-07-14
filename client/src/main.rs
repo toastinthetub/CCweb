@@ -1,6 +1,7 @@
 use crossterm::{
     cursor::{self, position, MoveTo},
     queue,
+    style::Stylize,
     terminal::{self, Clear, ClearType},
     QueueableCommand,
 };
@@ -141,7 +142,7 @@ impl GetRequest {
 }
 
 impl PostRequest {
-    fn build_post_request(key: String) -> () /* Self */ {
+    fn build_post_request(key: String) -> Self {
         let mut stdout = std::io::stdout();
 
         // key
@@ -149,16 +150,43 @@ impl PostRequest {
         let mut mode: String = String::new();
         let mut user: String = String::new();
         let mut languages_str = String::new();
-        let mut languages: Vec<String> = Vec::new();
-        let mut discordid: String = String::new();
+        let mut languages: Option<Vec<String>> = Some(Vec::new());
+        let mut discordid: Option<String> = Some(String::new());
 
-        print!("{}mode (c(reate), d(estroy), a(ppend), r(emove)): ", SHELL);
+        loop {
+            print!("{}mode (c(reate), d(estroy), a(ppend), r(emove)): ", SHELL);
+            stdout.flush().unwrap();
+            std::io::stdin()
+                .read_line(&mut mode)
+                .expect("failed to read for some reason");
+
+            let mode = mode.trim_end();
+
+            if mode == "c" || mode == "d" || mode == "a" || mode == "r" {
+                break;
+            } else {
+                println!("invalid mode! must be one of [c(reat), d(estroy), a(ppend), r(emove)]");
+                stdout.flush().unwrap();
+            }
+
+            let mode = mode.trim_end();
+        }
+
+        // print!("{}mode (c(reate), d(estroy), a(ppend), r(emove)): ", SHELL);
+        // stdout.flush().unwrap();
+        // std::io::stdin()
+        //     .read_line(&mut mode)
+        //     .expect("failed to read for some reason");
+
+        // let mode = mode.trim_end();
+
+        print!("{}username: ", SHELL);
         stdout.flush().unwrap();
         std::io::stdin()
-            .read_line(&mut mode)
+            .read_line(&mut user)
             .expect("failed to read for some reason");
 
-        let mode = mode.trim_end();
+        let user = user.trim_end();
 
         print!("{}languages (seperate by commas, or leave blank): ", SHELL);
         stdout.flush().unwrap();
@@ -171,23 +199,47 @@ impl PostRequest {
         print!("{}discord ID (leave blank for none): ", SHELL);
         stdout.flush().unwrap();
         std::io::stdin()
-            .read_line(&mut discordid)
+            .read_line(&mut discordid.as_mut().unwrap())
             .expect("kill yourself");
 
-        let languages_str: String = languages_str
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect();
-
-        let tmp: Vec<&str> = languages_str.split(',').collect();
-
-        for string in tmp {
-            let mut string = string.to_uppercase();
-            string.insert(0, '|');
-            languages.push(string);
+        if discordid.as_mut().unwrap() != "" {
+            discordid = Some(discordid.unwrap()) // pointless line
         }
 
-        // Self {}
-        ()
+        if languages_str != "" {
+            let languages_str: String = languages_str
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect();
+
+            let tmp: Vec<&str> = languages_str.split(',').collect();
+
+            for string in tmp {
+                let mut string = string.to_uppercase();
+                string.insert(0, '|');
+                languages.as_mut().unwrap().push(string);
+            }
+        } else {
+            languages = None;
+        }
+
+        Self {
+            base: BASE.to_owned(),
+            key: key,
+            mode: mode.to_owned(),
+            user: user.to_owned(),
+            languages: languages,
+            discord_id: discordid,
+        }
+    }
+    async fn make_post_request(&self, client: Client) -> String {
+        let tmp = String::new();
+        for string in self.languages.iter().collect() {
+            tmp.push_str(string);
+        }
+        let url = format!("{}/{}/{}/{}/");
+        let response = client.post(url).send().await.unwrap().text().await.unwrap();
+
+        response
     }
 }
