@@ -61,26 +61,37 @@ pub async fn get_handler(Path(param): Path<(String, String)>) -> Json<String> {
         }
     }
 
-    let user: Option<User> = match User::lookup_user(FILEPATH, &params.unwrap().user.unwrap()) {
-        Ok(user) => Some(user),
-        Err(e) => {
-            println!("Error: {:?}", e);
-            None
+    let user: Option<User> =
+        match User::lookup_user(FILEPATH, &params.unwrap().user.unwrap().clone()) {
+            Ok(user) => Some(user),
+            Err(e) => {
+                println!("Error: {:?}", e);
+                None
+            }
+        };
+
+    // let html_content = match user {
+    //     Some(user) => {
+    //         println!("served user: {:?}", user);
+    //         format!(r#"<h1>REQUESTED USER: {:?}</h1>"#, user)
+    //     }
+    //     None => {
+    //         format!(r#"<h1>NO USER FOUND!</h1>"#)
+    //     }
+    // };
+    // let html_content = format!(r#"<h1>{:?}</h1>"#, param);
+    // Html(html_content)
+
+    let json_content = match user {
+        Some(user) => {
+            println!("served user: {:?}", user);
+            format!(r#"REQUESTED USER: {:?}"#, serde_json::to_string(&user))
+        }
+        None => {
+            format!(r#"USER {} NOT FOUND!"#, param.1)
         }
     };
 
-    let html_content = match user {
-        Some(user) => {
-            println!("served user: {:?}", user);
-            format!(r#"<h1>REQUESTED USER: {:?}</h1>"#, user)
-        }
-        None => {
-            format!(r#"<h1>NO USER FOUND!</h1>"#)
-        }
-    };
-    // let html_content = format!(r#"<h1>{:?}</h1>"#, param);
-    // Html(html_content)
-    let json_content = format!("{:?}", param);
     return Json(json_content);
 }
 
@@ -101,7 +112,7 @@ pub async fn post_handler(
 
     let languages = match parse_languages(&params.languages.unwrap()) {
         Ok(languages) => languages,
-        Err(e) => {
+        Err(_) => {
             // println!("{:?}", languages);
             vec![Language::BadLanguage]
         }
