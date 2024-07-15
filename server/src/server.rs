@@ -95,7 +95,7 @@ pub async fn get_handler(Path(param): Path<(String, String)>) -> Json<String> {
     return Json(json_content);
 }
 
-pub async fn post_handler(
+pub async fn create_post_handler(
     Path(param): Path<(String, String, String, String, String)>,
 ) -> Json<String> /*Result<Result<Html<String>, Json<String>>, Box<dyn std::error::Error>>*/ {
     let params = match PathParams::from_post_list(axum::extract::Path(param.clone())) {
@@ -344,12 +344,51 @@ pub async fn post_handler(
     }
 
     let json = format!("this is json.");
-    let html = format!("<h1>this is html. you reached the bottom of the function.</h1>");
+    let html = format!("<h1>this is html. you reached the bottom of the function.</h1>"); // you should never see this
 
     // Ok(Err(Json(json)))
     // Ok(Ok(Html(html)))
     // Html(html)
     return Json(json);
+}
+
+pub async fn delete_post_handler(Path(param): Path<(String, String, String)>) -> Json<String> {
+    let placeholder: String = String::from("monkey!");
+
+    let key = param.0;
+    let user = param.1;
+
+    match authenticate(key.clone()) {
+        Ok(_) => {
+            println!("key {} accepted", key);
+        }
+        Err(e) => {
+            // let html = format!("<h1>Invalid key: {}</1>", params.key.clone().unwrap());
+            let json = format!("Error: invalid key: {:?}", key);
+            println!("{:}", e);
+            // return Html(html);
+            return Json(json);
+        }
+    }
+
+    match user::User::lookup_user(FILEPATH, &user) {
+        Ok(_) => {}
+        Err(_) => {
+            let json = format!("USER {} NOT FOUND!", user);
+            return Json(json);
+        }
+    }
+
+    match user::User::remove_user(FILEPATH, &user) {
+        Ok(_) => {
+            let json: String = format!("USER {} SUCCESSFULLY DELETED!", user);
+            return Json(json);
+        }
+        Err(e) => {
+            let json: String = format!("FAILED TO DELETE USER {}: {}", user, e);
+            return Json(json);
+        }
+    }
 }
 
 fn authenticate(key: String) -> Result<(), Box<dyn Error>> {
@@ -449,6 +488,6 @@ fn parse_languages(languages_str: &str) -> Result<Vec<Language>, &str> {
     //             return Err(language);
     //         }
     //     }
-    // }
+    // }5
     Ok(languages)
 }

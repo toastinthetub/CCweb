@@ -8,6 +8,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use server::delete_post_handler;
 
 #[tokio::main]
 async fn main() {
@@ -27,9 +28,13 @@ async fn main() {
     let app = Router::new()
         .route(
             "/:key/:mode/:user/:languages/:discordid",
-            get(crate::server::post_handler).post(crate::server::post_handler),
+            get(crate::server::create_post_handler).post(crate::server::create_post_handler),
         )
-        .route("/:key/:user/", get(crate::server::get_handler));
+        .route("/:key/:user/", get(crate::server::get_handler))
+        .route(
+            "/:key/:mode/:user",
+            get(delete_post_handler).post(delete_post_handler),
+        );
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     println!("listening on {}", listener.local_addr().unwrap());
