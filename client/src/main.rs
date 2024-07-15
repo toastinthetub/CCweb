@@ -109,7 +109,38 @@ async fn main() {
             println!("{}task completed, result:", SHELL);
             println!("{}", result);
         }
-        Mode::Post => {}
+        Mode::Post => {
+            let mut cc_post = PostRequest::build_post_request(api_key);
+            println!("{}sending POST request to '{}'", SHELL, cc_post.string());
+            let task = task::spawn(async move { cc_post.make_post_request(client).await });
+
+            let (_, y) = crossterm::cursor::position().unwrap();
+            let mut counter: u16 = 0;
+
+            while !task.is_finished() {
+                queue!(stdout, Clear(ClearType::CurrentLine), MoveTo(0, y)).unwrap();
+                stdout.flush().unwrap();
+
+                if counter > 10 {
+                    counter = 0;
+                }
+
+                let mut string = String::new();
+                for _ in 0..counter {
+                    string.push_str(".");
+                }
+
+                print!("{}", string);
+                stdout.flush().unwrap();
+
+                counter += 1;
+            }
+
+            let result = task.await.unwrap();
+            println!("");
+            println!("{}task completed, result:", SHELL);
+            println!("{}", result);
+        }
     }
 }
 
@@ -160,17 +191,19 @@ impl PostRequest {
                 .read_line(&mut mode)
                 .expect("failed to read for some reason");
 
-            let mode = mode.trim_end();
+            let mut mode = mode.trim_end();
 
             if mode == "c" || mode == "d" || mode == "a" || mode == "r" {
                 break;
             } else {
                 println!("invalid mode! must be one of [c(reat), d(estroy), a(ppend), r(emove)]");
                 stdout.flush().unwrap();
+                mode = "";
             }
-
-            let mode = mode.trim_end();
+            mode = "";
         }
+
+        let mode = mode.trim_end();
 
         // print!("{}mode (c(reate), d(estroy), a(ppend), r(emove)): ", SHELL);
         // stdout.flush().unwrap();
@@ -232,14 +265,58 @@ impl PostRequest {
             discord_id: discordid,
         }
     }
-    async fn make_post_request(&self, client: Client) -> String {
-        let tmp = String::new();
-        for string in self.languages.iter().collect() {
+    async fn make_post_request(&mut self, client: Client) -> String {
+        let mut tmp = String::new();
+        let mut tmp2: String = String::new();
+        for string in self.languages.as_mut().unwrap().iter() {
             tmp.push_str(string);
+        } // base key mode username |languages| dsicordid
+
+        if self.languages.is_some() {
+            // the holy ghost shall poach your soul
+        } else {
+            tmp = "null".to_owned();
         }
-        let url = format!("{}/{}/{}/{}/");
+
+        if self.discord_id.is_some() {
+            // the eternal flame shall consume you
+            tmp2 = <Option<String> as Clone>::clone(&self.discord_id).unwrap();
+        } else {
+            tmp2 = "null".to_owned()
+        }
+
+        let url = format!(
+            "{}/{}/{}/{}/{}/{}",
+            self.base, self.key, self.mode, self.user, tmp, tmp2
+        );
         let response = client.post(url).send().await.unwrap().text().await.unwrap();
 
         response
+    }
+    fn string(&mut self) -> String {
+        let mut lstring = String::new();
+        let mut istring: String = String::new();
+        for string in self.languages.as_mut().unwrap().iter() {
+            lstring.push_str(string);
+        } // base key mode username |languages| dsicordid
+
+        if self.languages.is_some() {
+            // the holy ghost shall poach your soul
+        } else {
+            lstring = "null".to_owned();
+        }
+
+        if self.discord_id.is_some() {
+            // the eternal flame shall consume you
+            istring = <Option<String> as Clone>::clone(&self.discord_id).unwrap();
+        } else {
+            istring = "null".to_owned()
+        }
+
+        let string = format!(
+            "{}/{}/{}/{}/{}/{}",
+            self.base, self.key, self.mode, self.user, lstring, istring
+        );
+        string
     }
 }
