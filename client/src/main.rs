@@ -39,49 +39,15 @@ struct PostRequest {
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
+
     let api_key = env::var("API_KEY").expect("API_KEY not set in .env file");
 
     let client = Client::new();
+    let mut input = String::new();
+    let mode: Mode;
+
     let mut stdout = std::io::stdout();
 
-    loop {
-        let mode = get_user_mode(&mut stdout);
-
-        match mode {
-            Mode::Get => {
-                let cc_request = GetRequest::build_get_request(api_key.clone());
-                println!("{}sending GET request to '{}'", SHELL, cc_request.string());
-                let client_clone = client.clone();
-                let task =
-                    task::spawn(async move { cc_request.make_get_request(client_clone).await });
-
-                display_loading(&mut stdout, task).await;
-            }
-            Mode::Post => {
-                let mut cc_post = PostRequest::build_post_request(api_key.clone());
-                println!("{}sending POST request to '{}'", SHELL, cc_post.string());
-                let client_clone = client.clone();
-                let task =
-                    task::spawn(async move { cc_post.make_post_request(client_clone).await });
-
-                display_loading(&mut stdout, task).await;
-            }
-        }
-
-        println!("Do you want to make another request? (y/n)");
-        stdout.flush().unwrap();
-        let mut input = String::new();
-        std::io::stdin()
-            .read_line(&mut input)
-            .expect("failed to read for some reason");
-        if input.trim_end().to_lowercase() != "y" {
-            break;
-        }
-    }
-}
-
-fn get_user_mode(stdout: &mut std::io::Stdout) -> Mode {
-    let mut input = String::new();
     loop {
         print!("{}", SHELL);
         stdout.flush().unwrap();
@@ -89,52 +55,98 @@ fn get_user_mode(stdout: &mut std::io::Stdout) -> Mode {
             .read_line(&mut input)
             .expect("failed to read for some reason");
         match input.trim_end() {
-            "get" => return Mode::Get,
-            "post" => return Mode::Post,
+            "get" => {
+                mode = Mode::Get;
+                break;
+            }
+            "post" => {
+                mode = Mode::Post;
+                break;
+            }
             "help" => {
                 todo!();
+                // help();
+                // TODO: Help
+                break;
             }
             _ => {
-                println!(
-                    "Command: '{}' not understood. try pass 'help'",
-                    input.trim_end()
-                );
+                println!("{}", input);
+                println!("Command: '{}' not understood. try pass 'help'", input);
             }
         }
         input.clear();
     }
-}
+    match mode {
+        Mode::Get => {
+            let cc_request = GetRequest::build_get_request(api_key);
+            println!("{}sending GET request to '{}'", SHELL, cc_request.string());
+            let task = task::spawn(async move { cc_request.make_get_request(client).await });
 
-async fn display_loading<T>(stdout: &mut std::io::Stdout, task: task::JoinHandle<T>) -> T {
-    let (_, y) = crossterm::cursor::position().unwrap();
-    let mut counter: u16 = 0;
+            let (_, y) = crossterm::cursor::position().unwrap();
+            let mut counter: u16 = 0;
 
-    while !task.is_finished() {
-        queue!(stdout, Clear(ClearType::CurrentLine), MoveTo(0, y)).unwrap();
-        stdout.flush().unwrap();
+            while !task.is_finished() {
+                queue!(stdout, Clear(ClearType::CurrentLine), MoveTo(0, y)).unwrap();
+                stdout.flush().unwrap();
 
-        if counter > 10 {
-            counter = 0;
+                if counter > 10 {
+                    counter = 0;
+                }
+
+                let mut string = String::new();
+                for _ in 0..counter {
+                    string.push_str(".");
+                }
+
+                print!("{}", string);
+                stdout.flush().unwrap();
+
+                counter += 1;
+            }
+
+            let result = task.await.unwrap();
+            println!("");
+            println!("{}task completed, result:", SHELL);
+            println!("{}", result);
         }
+        Mode::Post => {
+            let mut cc_post = PostRequest::build_post_request(api_key);
+            println!("{}sending POST request to '{}'", SHELL, cc_post.string());
+            let task = task::spawn(async move { cc_post.make_post_request(client).await });
 
-        let mut string = String::new();
-        for _ in 0..counter {
-            string.push('.');
+            let (_, y) = crossterm::cursor::position().unwrap();
+            let mut counter: u16 = 0;
+
+            while !task.is_finished() {
+                queue!(stdout, Clear(ClearType::CurrentLine), MoveTo(0, y)).unwrap();
+                stdout.flush().unwrap();
+
+                if counter > 10 {
+                    counter = 0;
+                }
+
+                let mut string = String::new();
+                for _ in 0..counter {
+                    string.push_str(".");
+                }
+
+                print!("{}", string);
+                stdout.flush().unwrap();
+
+                counter += 1;
+            }
+
+            let result = task.await.unwrap();
+            println!("");
+            println!("{}task completed, result:", SHELL);
+            println!("{}", result);
         }
-
-        print!("{}", string);
-        stdout.flush().unwrap();
-
-        counter += 1;
     }
-
-    println!("");
-    println!("{}task completed, result:", SHELL);
-    task.await.unwrap()
 }
 
 impl GetRequest {
     fn build_get_request(key: String) -> Self {
+        // this has to own it cause make_get_request() is async
         let mut stdout = std::io::stdout();
         let mut user: String = String::new();
         print!("{}enter a username to lookup: ", SHELL);
@@ -148,26 +160,29 @@ impl GetRequest {
             user: user.trim_end().to_string(),
         }
     }
-
     async fn make_get_request(&self, client: Client) -> String {
         let url = format!("{}/{}/{}/", self.base, self.key, self.user);
         let response = client.get(url).send().await.unwrap().text().await.unwrap();
+
         response
     }
-
     fn string(&self) -> String {
-        format!("{}/{}/{}/", self.base, self.key, self.user)
+        let url = format!("{}/{}/{}/", self.base, self.key, self.user);
+        url
     }
 }
 
 impl PostRequest {
     fn build_post_request(key: String) -> Self {
         let mut stdout = std::io::stdout();
-        let mut mode = String::new();
-        let mut user = String::new();
+
+        // key
+
+        let mut mode: String = String::new();
+        let mut user: String = String::new();
         let mut languages_str = String::new();
-        let mut languages = Some(Vec::new());
-        let mut discordid = Some(String::new());
+        let mut languages: Option<Vec<String>> = Some(Vec::new());
+        let mut discordid: Option<String> = Some(String::new());
 
         loop {
             print!("{}mode (c(reate), d(estroy), a(ppend), r(emove)): ", SHELL);
@@ -176,13 +191,27 @@ impl PostRequest {
                 .read_line(&mut mode)
                 .expect("failed to read for some reason");
 
-            if ["c", "d", "a", "r"].contains(&mode.trim_end()) {
+            let mut mode = mode.trim_end();
+
+            if mode == "c" || mode == "d" || mode == "a" || mode == "r" {
                 break;
             } else {
                 println!("invalid mode! must be one of [c(reat), d(estroy), a(ppend), r(emove)]");
-                mode.clear();
+                stdout.flush().unwrap();
+                mode = "";
             }
+            mode = "";
         }
+
+        let mode = mode.trim_end();
+
+        // print!("{}mode (c(reate), d(estroy), a(ppend), r(emove)): ", SHELL);
+        // stdout.flush().unwrap();
+        // std::io::stdin()
+        //     .read_line(&mut mode)
+        //     .expect("failed to read for some reason");
+
+        // let mode = mode.trim_end();
 
         print!("{}username: ", SHELL);
         stdout.flush().unwrap();
@@ -190,88 +219,104 @@ impl PostRequest {
             .read_line(&mut user)
             .expect("failed to read for some reason");
 
-        print!("{}languages (separate by commas, or leave blank): ", SHELL);
+        let user = user.trim_end();
+
+        print!("{}languages (seperate by commas, or leave blank): ", SHELL);
         stdout.flush().unwrap();
         std::io::stdin()
             .read_line(&mut languages_str)
             .expect("failed to read for some reason");
 
+        let languages_str = languages_str.trim_end();
+
         print!("{}discord ID (leave blank for none): ", SHELL);
         stdout.flush().unwrap();
         std::io::stdin()
             .read_line(&mut discordid.as_mut().unwrap())
-            .expect("failed to read for some reason");
+            .expect("kill yourself");
 
-        if discordid.as_ref().unwrap().is_empty() {
-            discordid = None;
+        if discordid.as_mut().unwrap() != "" {
+            discordid = Some(discordid.unwrap()) // pointless line
         }
 
-        if !languages_str.trim_end().is_empty() {
-            let languages_vec: Vec<String> = languages_str
-                .trim_end()
-                .split(',')
-                .map(|s| format!("|{}", s.trim().to_uppercase()))
+        if languages_str != "" {
+            let languages_str: String = languages_str
+                .chars()
+                .filter(|c| !c.is_whitespace())
                 .collect();
-            languages = Some(languages_vec);
+
+            let tmp: Vec<&str> = languages_str.split(',').collect();
+
+            for string in tmp {
+                let mut string = string.to_uppercase();
+                string.insert(0, '|');
+                languages.as_mut().unwrap().push(string);
+            }
         } else {
             languages = None;
         }
 
         Self {
             base: BASE.to_owned(),
-            key,
-            mode: mode.trim_end().to_owned(),
-            user: user.trim_end().to_owned(),
-            languages,
+            key: key,
+            mode: mode.to_owned(),
+            user: user.to_owned(),
+            languages: languages,
             discord_id: discordid,
         }
     }
-
     async fn make_post_request(&mut self, client: Client) -> String {
-        let languages_str = if let Some(languages) = &self.languages {
-            languages.join("")
-        } else {
-            "null".to_owned()
-        };
+        let mut tmp = String::new();
+        let mut tmp2: String = String::new();
+        for string in self.languages.as_mut().unwrap().iter() {
+            tmp.push_str(string);
+        } // base key mode username |languages| dsicordid
 
-        let discord_id_str = if let Some(discord_id) = &self.discord_id {
-            discord_id.clone()
+        if self.languages.is_some() {
+            // the holy ghost shall poach your soul
         } else {
-            "null".to_owned()
-        };
+            tmp = "null".to_owned();
+        }
+
+        if self.discord_id.is_some() {
+            // the eternal flame shall consume you
+            tmp2 = <Option<String> as Clone>::clone(&self.discord_id).unwrap();
+        } else {
+            tmp2 = "null".to_owned()
+        }
 
         let url = format!(
             "{}/{}/{}/{}/{}/{}",
-            self.base, self.key, self.mode, self.user, languages_str, discord_id_str
+            self.base, self.key, self.mode, self.user, tmp, tmp2
         );
+        let response = client.post(url).send().await.unwrap().text().await.unwrap();
 
-        let response = client
-            .post(&url)
-            .send()
-            .await
-            .unwrap()
-            .text()
-            .await
-            .unwrap();
         response
     }
+    fn string(&mut self) -> String {
+        let mut lstring = String::new();
+        let mut istring: String = String::new();
+        for string in self.languages.as_mut().unwrap().iter() {
+            lstring.push_str(string);
+        } // base key mode username |languages| dsicordid
 
-    fn string(&self) -> String {
-        let languages_str = if let Some(languages) = &self.languages {
-            languages.join("")
+        if self.languages.is_some() {
+            // the holy ghost shall poach your soul
         } else {
-            "null".to_owned()
-        };
+            lstring = "null".to_owned();
+        }
 
-        let discord_id_str = if let Some(discord_id) = &self.discord_id {
-            discord_id.clone()
+        if self.discord_id.is_some() {
+            // the eternal flame shall consume you
+            istring = <Option<String> as Clone>::clone(&self.discord_id).unwrap();
         } else {
-            "null".to_owned()
-        };
+            istring = "null".to_owned()
+        }
 
-        format!(
+        let string = format!(
             "{}/{}/{}/{}/{}/{}",
-            self.base, self.key, self.mode, self.user, languages_str, discord_id_str
-        )
+            self.base, self.key, self.mode, self.user, lstring, istring
+        );
+        string
     }
 }
